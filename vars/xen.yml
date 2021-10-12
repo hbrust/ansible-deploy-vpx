@@ -1,0 +1,6 @@
+# Hypervisor
+# Login Credentials
+xen:
+  ip: "192.168.240.242"
+  user: "root"
+  pw: "Citrix#123"

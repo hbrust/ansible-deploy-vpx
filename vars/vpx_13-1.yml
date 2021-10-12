@@ -1,0 +1,22 @@
+# ADC
+adc:
+  # VM template
+  vmTemplate: "ADC 13.1-4.43"
+
+  # ADC details
+  name: "demo-13-1" 
+  nsip: "192.168.240.30" 
+  snip: "192.168.240.31"
+  netmask: "255.255.255.0"
+  gateway: "192.168.240.254"
+  user: "nsroot" 
+  password: "Citrix123"
+
+  # ADC baseconfig
+  ntp: "192.168.240.254"
+  dns: "192.168.240.254"
+
+  # Bandwidth for pooled licensing
+  # in MBits
+  bandwidth: 30
+

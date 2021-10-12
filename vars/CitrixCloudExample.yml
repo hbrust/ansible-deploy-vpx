@@ -1,0 +1,6 @@
+# Citrix Cloud
+# Login Credentials
+citrixcloud:
+  client_id: "xxx"
+  client_secret: "xxx"
+  customer_id: "xxx"

@@ -1,0 +1,305 @@
+---
+- hosts: localhost
+  collections: 
+    - citrix.adc
+    - citrix.adm
+
+  ########################################################
+  #
+  #  VARIABLES
+  #
+
+  vars_files:
+  - ./vars/CitrixCloud.yml  # CitrixCloud
+  - ./vars/xen.yml          # Hypervisor Credentials
+  #
+  # VPX informations need to be specified in extra var 
+  # file at CLI
+  # 
+  ########################################################
+  
+  ########################################################
+  # 
+  #  TASKS
+  # 
+
+  tasks:
+  - name: Create VPX from a template
+    xenserver_guest:
+      hostname: "{{ xen.ip }}"
+      username: "{{ xen.user }}"
+      password: "{{ xen.pw }}"
+      validate_certs: no
+      folder: "/adc"
+      name: "{{ adc.name }}"
+      state: poweredon
+      template: "{{ adc.vmTemplate }}"
+      disks:
+        - size_gb: 20
+      hardware:
+        num_cpus: 2
+        num_cpu_cores_per_socket: 1
+        memory_mb: 2048
+      networks:
+        - name: ADC-CNN-Demo-Network
+      wait_for_ip_address: yes
+      custom_params:
+        - key: xenstore_data
+          value: { "vm-data/ip" : "{{ adc.nsip }}" ,"vm-data/netmask" : "{{ adc.netmask }}", "vm-data/gateway" : "{{ adc.gateway }}" } 
+    delegate_to: localhost
+    register: deploy
+
+
+
+  - name: Wait VPX coming up
+    uri:
+      url: "http://{{ adc.nsip }}"
+      status_code: 200
+    register: adc_http
+    until: adc_http.status == 200
+    retries: 60
+    delay: 1
+
+
+
+  - name: ADC VPX Password reset
+    delegate_to: localhost
+    ignore_errors: true
+    citrix_adc_password_reset:
+      nsip: "{{ adc.nsip }}"
+      username: "{{ adc.user }}"
+      nitro_protocol: https
+      validate_certs: no
+      password: nsroot
+      new_password: "{{ adc.password }}"
+
+
+
+  # ------------------------------------------------------
+  #  do basic config stuff
+  #  alternative: build jinja2 nsconf template and upload
+  #  see: https://github.com/citrix/citrix-adc-ansible-modules/blob/master/docs/generic_modules/template_ns_conf.rst
+  #
+  - name: configure SNIP
+    delegate_to: localhost
+    citrix_adc_nitro_resource:
+      nsip: "{{ adc.nsip }}"
+      nitro_user: "{{ adc.user }}"
+      nitro_pass: "{{ adc.password }}"
+      nitro_protocol: https
+      validate_certs: no
+
+      # object check
+      state: present
+      workflow:
+        lifecycle: 'object'
+        endpoint: "nsip"
+        resource_missing_errorcode: 258
+        primary_id_attribute: "ipaddress"
+      resource:
+        ipaddress: "{{ adc.snip }}"
+        netmask: "{{ adc.netmask }}"
+        td: "0"
+
+
+
+  - name: configure DNS on ADC
+    delegate_to: localhost
+    citrix_adc_nitro_resource:
+      nsip: "{{ adc.nsip }}"
+      nitro_user: "{{ adc.user }}"
+      nitro_pass: "{{ adc.password }}"
+      nitro_protocol: https
+      validate_certs: no
+
+      # object check
+      state: present
+      workflow:
+        lifecycle: 'object'
+        endpoint: "dnsnameserver"
+        resource_missing_errorcode: 258
+      resource:
+        ip: "{{ adc.dns }}"
+
+
+
+  - name: configure NTP on ADC
+    delegate_to: localhost
+    citrix_adc_nitro_resource:
+      nsip: "{{ adc.nsip }}"
+      nitro_user: "{{ adc.user }}"
+      nitro_pass: "{{ adc.password }}"
+      nitro_protocol: https
+      validate_certs: no
+
+      # object check
+      state: present
+      workflow:
+        lifecycle: 'object'
+        endpoint: "ntpserver"
+        resource_missing_errorcode: 258
+      resource:
+        servername: "{{ adc.ntp }}"
+
+
+
+  # ------------------------------------------------------
+  #  register in ADM service
+  #
+  - name: get Citrix Cloud token for ADM Service login
+    delegate_to: localhost
+    register: citrixcloud_login
+    citrix_citrixcloud_login:
+      id: "{{ citrixcloud.client_id }}"
+      secret: "{{ citrixcloud.client_secret }}"
+      customerid: "{{ citrixcloud.customer_id }}"
+
+
+
+  - name: get agent information
+    uri:
+      url: https://adm.cloud.com/massvc/CNCE94/nitro/v2/config/mps_agent?filter=Host%20Name%3Aadm-agent-cnce
+      method: GET
+      return_content: yes
+      status_code: 200
+      validate_certs: true
+      headers:
+        Content-Type: application/json
+        Authorization: "CwsAuth bearer={{ citrixcloud_login.token }}"
+        customerid: "{{ citrixcloud.customer_id }}"
+        isCloud: true 
+    register: adm_agent
+
+  - name: add VPX to ADM 
+    delegate_to: localhost
+    
+    citrix_adm_managed_device:
+      adm_ip: "adm.cloud.com"
+      customerid: "{{ citrixcloud.customer_id }}"
+      cc_token: "{{ citrixcloud_login.token }}"
+      is_cloud: true
+
+      # set base information
+      agent_id: "{{ adm_agent['json']['mps_agent'][0]['id'] }}"
+      profile_name: "nsroot_helgeb"
+      ip_address: "{{ adc.nsip }}"
+      name: "{{ adc.name }}"
+
+  - name: wait for processing
+    pause:
+      seconds: 5
+
+  - name: get ADC device information 
+    delegate_to: localhost
+    register: adm
+    citrix_adm_managed_device:
+      adm_ip: "adm.cloud.com"
+      customerid: "{{ citrixcloud.customer_id }}"
+      cc_token: "{{ citrixcloud_login.token }}"
+      is_cloud: true
+      # set base information
+      ip_address: "{{ adc.nsip }}"
+      name: "{{ adc.name }}"
+
+
+  # ------------------------------------------------------
+  #  assign license from pool
+  #
+  - name: configure licenseserver on ADC
+    delegate_to: localhost
+    citrix_adc_nitro_resource:
+      nsip: "{{ adc.nsip }}"
+      nitro_user: "{{ adc.user }}"
+      nitro_pass: "{{ adc.password }}"
+      nitro_protocol: https
+      validate_certs: no
+
+      # object check
+      state: present
+      workflow:
+        lifecycle: 'object'
+        endpoint: "nslicenseserver"
+        resource_missing_errorcode: 258
+        primary_id_attribute: "licenseserverip"
+
+      resource:
+        licenseserverip: "{{ adm_agent['json']['mps_agent'][0]['name'] }}"
+        port: "27000"
+
+
+
+  - name: allocate license to VPX 
+    uri:
+      url: "https://adm.cloud.com/massvc/{{ citrixcloud.customer_id }}/nitro/v2/config/managed_device?action=allocate_license"
+      method: POST
+      return_content: yes
+      status_code: 200
+      validate_certs: true
+      body_format: json
+      body: |
+        { 
+          "managed_device" : { 
+            "id": "{{ adm.managed_device.id }}",
+            "agent_id" : "{{ adm_agent['json']['mps_agent'][0]['id'] }}",
+            "license_edition": "Platinum",
+            "plt_bw_config" : "{{ adc.bandwidth }}"
+            }      
+        } 
+      headers:
+        Content-Type: application/json
+        Authorization: "CwsAuth bearer={{ citrixcloud_login.token }}"
+        customerid: "{{ citrixcloud.customer_id }}"
+        isCloud: true 
+    register: adm_inventory
+
+
+  
+  # ------------------------------------------------------
+  #  SSL CERT files copy
+  #
+  - name: copy cert to ADC
+    delegate_to: localhost
+    citrix.adc.citrix_adc_system_file:
+      nsip: "{{ adc.nsip }}"
+      nitro_user: "{{ adc.user }}"
+      nitro_pass: "{{ adc.password }}"
+      validate_certs: no
+
+      state: present
+
+      filelocation: /nsconfig/ssl/
+      filename: wildcard_demo.local.crt
+      filecontent: "{{ lookup('file','wildcard_demo.local.crt')  }}"
+
+
+
+  - name: copy key to ADC
+    delegate_to: localhost
+    citrix.adc.citrix_adc_system_file:
+      nsip: "{{ adc.nsip }}"
+      nitro_user: "{{ adc.user }}"
+      nitro_pass: "{{ adc.password }}"
+      validate_certs: no
+
+      state: present
+
+      filelocation: /nsconfig/ssl/
+      filename: wildcard_demo.local.key
+      filecontent: "{{ lookup('file','wildcard_demo.local.key') }}"
+
+
+
+  - name: Setup ssl certkey
+    delegate_to: localhost
+    citrix_adc_ssl_certkey:
+      nsip: "{{ adc.nsip }}"
+      nitro_user: "{{ adc.user }}"
+      nitro_pass: "{{ adc.password }}"
+      validate_certs: no
+
+      certkey: wildcard_demo_local
+      cert:  wildcard_demo.local.crt
+      key:  wildcard_demo.local.key
+      expirymonitor: enabled
+      notificationperiod: 30
+      inform: DER
