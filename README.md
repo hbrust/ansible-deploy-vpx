@@ -5,13 +5,14 @@ This Ansible playbook is a proof of concept how to deploy and integrate a [Citri
 The Flow looks like this
 1. deployment of VPX out of an existing VM Template
 2. initial password change
-3. adding ADC instance to [ADM Service](adm.cloud.com)
-4. allocate bandwidth license to instance by using pooled licensing
-5. copy Files to instance (e.g. SSL certificates) 
+3. configuring some basic stuff
+4. adding ADC instance to [ADM Service](adm.cloud.com)
+5. allocate bandwidth license to instance by using pooled licensing
+6. copy Files to instance (e.g. SSL certificates) 
 
 # Prerequisites
 1. [install Citrix ADC and ADM ansible modules](https://netscaler-ansible.readthedocs.io/en/latest/usage/getting_started.html)
-2. replace `citrix_adm.py` in your installation (mostly `/home/<user>/.ansible/collections/ansible_collections/citrix/adm/plugins/module_utils/citrix_adm.py`) with the [modified one of this repo](deps/citrix_adm.py). This is necessary because of a bug in the original one, Citrix engineering is already aware of that and it will be fixed in future release.
+2. replace `citrix_adm.py` in your installation (mostly `/home/<user>/.ansible/collections/ansible_collections/citrix/adm/plugins/module_utils/citrix_adm.py`) with the [modified one of this repo](deps/citrix_adm.py). This is necessary because of a bug in Cloud connect with the original one, Citrix engineering is already aware of that and it will be fixed in future release.
 3. change the [variable files](vars)
 4. start playbook with `ansible-playbook -e "@vars/<your-vpx-variables>"`
 5. Have Fun.
